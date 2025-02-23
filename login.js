@@ -29,7 +29,7 @@ function createProxyAgent(proxy) {
   return null;
 }
 
-// Function to display a banner (simulation of banner run)
+// Function to display a banner
 async function showBanner() {
   return new Promise((resolve) => {
     console.log(banner);
@@ -39,60 +39,72 @@ async function showBanner() {
   });
 }
 
-// Function to authenticate a single wallet with proxy rotation
+// Function to authenticate a wallet with retry logic
 async function signAndSend(privateKey) {
-  try {
-    const nonce = `timestamp_${Date.now()}`;
-    const proxy = getNextProxy();
-    const agent = createProxyAgent(proxy);
+  let attempts = 0;
+  const maxRetries = 15;
 
-    const axiosConfig = {
-      headers: {
-        'Content-Type': 'application/json',
-        'Host': 'api-kiteai.bonusblock.io',
-        'Accept': 'application/json, text/plain, */*',
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
-        'Origin': 'https://testnet.gokite.ai',
-        'Referer': 'https://testnet.gokite.ai/'
-      },
-      httpsAgent: agent,
-      httpAgent: agent
-    };
+  while (attempts < maxRetries) {
+    try {
+      const nonce = `timestamp_${Date.now()}`;
+      const proxy = getNextProxy();
+      const agent = createProxyAgent(proxy);
 
-    console.log(`Using Proxy: ${proxy}`);
+      const axiosConfig = {
+        headers: {
+          'Content-Type': 'application/json',
+          'Host': 'api-kiteai.bonusblock.io',
+          'Accept': 'application/json, text/plain, */*',
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+          'Origin': 'https://testnet.gokite.ai',
+          'Referer': 'https://testnet.gokite.ai/'
+        },
+        httpsAgent: agent,
+        httpAgent: agent
+      };
 
-    const authTicketResponse = await axios.post(
-      'https://api-kiteai.bonusblock.io/api/auth/get-auth-ticket',
-      { nonce: nonce },
-      axiosConfig
-    );
+      console.log(`Using Proxy: ${proxy}`);
 
-    console.log(`Auth Ticket Response for ${privateKey.slice(0, 6)}...:`, authTicketResponse.data);
+      const authTicketResponse = await axios.post(
+        'https://api-kiteai.bonusblock.io/api/auth/get-auth-ticket',
+        { nonce: nonce },
+        axiosConfig
+      );
 
-    const wallet = new Wallet(privateKey);
-    const signedMessage = await wallet.signMessage(nonce);
+      console.log(` ✅ Auth Ticket Response for ${privateKey.slice(0, 6)}...:`, authTicketResponse.data);
 
-    const requestData = {
-      blockchainName: "ethereum",
-      signedMessage: signedMessage,
-      nonce: nonce,
-      referralId: "optionalReferral"
-    };
+      const wallet = new Wallet(privateKey);
+      const signedMessage = await wallet.signMessage(nonce);
 
-    const authEthResponse = await axios.post(
-      'https://api-kiteai.bonusblock.io/api/auth/eth',
-      requestData,
-      axiosConfig
-    );
+      const requestData = {
+        blockchainName: "ethereum",
+        signedMessage: signedMessage,
+        nonce: nonce,
+        referralId: "optionalReferral"
+      };
 
-    console.log(`Login Successful for ${privateKey.slice(0, 6)}...`);
-    
-  } catch (error) {
-    console.error(`Error with ${privateKey.slice(0, 6)}...:`, error.response ? error.response.data : error.message);
+      const authEthResponse = await axios.post(
+        'https://api-kiteai.bonusblock.io/api/auth/eth',
+        requestData,
+        axiosConfig
+      );
+
+      console.log(`🔥 Login Successful for ${privateKey.slice(0, 6)}...`);
+      return; // Exit function if successful
+
+    } catch (error) {
+      console.error(`Error with ${privateKey.slice(0, 6)}... (Attempt ${attempts + 1}/${maxRetries}):`, error.response ? error.response.data : error.message);
+      attempts++;
+      if (attempts < maxRetries) {
+        console.log(`Retrying in 1 second...`);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      } else {
+        console.log(`Max retries reached for ${privateKey.slice(0, 6)}. Skipping to next key.`);
+      }
+    }
   }
 }
 
-// Function to process requests sequentially with a delay
 // Function to process requests sequentially with a delay
 async function processSequentially(keys) {
   for (let i = 0; i < keys.length; i++) {
@@ -116,4 +128,3 @@ async function processSequentially(keys) {
     await processSequentially(privateKeys);
   }
 })();
-
